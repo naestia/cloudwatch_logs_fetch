@@ -1,0 +1,81 @@
+/*
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+)
+
+func main() {
+	var log_group_name = "testing_group"
+
+	var log_query_string = "fields @timestamp, @message, @logStream, @log | sort @timestamp desc | limit 20"
+	var from_epoch_date = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	var query_start_date = time.Date(2023, 7, 1, 6, 30, 0, 0, time.UTC)
+	var query_end_date = time.Now()
+	var query_start_time = query_start_date.Sub(from_epoch_date)
+	var query_end_time = query_end_date.Sub(from_epoch_date)
+
+	// Initializes a connection to AWS
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("eu-north-1"))
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	// Create a variable that will be used to make requests to AWS CloudWatch
+	client := cloudwatchlogs.NewFromConfig(cfg)
+
+	// Expectations: I wanted GetQueryResults to return each log event when matched with the query pattern from StartQuery...
+	// Reality: GetQueryResults returns an array of arrays, and at the time I can't seem to extract the desired information of the arrays.
+	// I will therefore archive this solution for possible future use.
+
+	query_ids, err := client.StartQuery(context.TODO(), &cloudwatchlogs.StartQueryInput{
+		EndTime:      aws.Int64(int64(query_end_time)),
+		StartTime:    aws.Int64(int64(query_start_time)),
+		QueryString:  aws.String(log_query_string),
+		LogGroupName: aws.String(log_group_name),
+	})
+	if err != nil {
+		log.Fatalf("Failed to query AWS CloudWatch: ", err)
+	}
+
+	fmt.Println(*query_ids.QueryId)
+
+	query_result, err := client.GetQueryResults(context.TODO(), &cloudwatchlogs.GetQueryResultsInput{
+		QueryId: aws.String(*query_ids.QueryId),
+	})
+	if err != nil {
+		log.Fatalf("Failed to fetch query result: ", err)
+	}
+
+	fmt.Println(query_result)
+
+	for _, result := range query_result.Results {
+		fmt.Println(result)
+	}
+
+	// Requests to AWS CloudWatch to get all log events from the specified log group and stream
+	resp, err := client.GetLogEvents(context.TODO(), &cloudwatchlogs.GetLogEventsInput{
+		LogGroupName:  aws.String(log_group_name),
+		LogStreamName: aws.String("testing_stream"),
+	})
+	if err != nil {
+		log.Fatalf("Failed to fetch log events: %v", err)
+	}
+
+	// Prints all the output from the response given by CloudWatch
+	fmt.Println("Response")
+	for _, event := range resp.Events {
+		var timestamp = time.Unix(0, *event.Timestamp*int64(time.Millisecond))
+		fmt.Println("Timestamp:", timestamp.Format(time.RFC3339))
+		//fmt.Println("  ", *event.Message)
+		//fmt.Println("")
+	}
+}
+*/
