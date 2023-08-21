@@ -9,15 +9,57 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+
+	ctypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
+	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
 )
 
+func check_query(client *cloudwatchlogs.Client, query_id string) {
+	// Bool variable that will keep track of the success or failure of the query
+	var success bool = false
+
+	// Creates a request to CloudWatch Logs to get the query result
+	result, err := client.GetQueryResults(context.TODO(), &cloudwatchlogs.GetQueryResultsInput{
+		QueryId: aws.String(query_id),
+	})
+	if err != nil {
+		log.Fatalf("Failed to get the Query result: %v", err)
+	}
+
+	// This check looks for the status code: 'complete' from StartQuery
+	if result.Status == ctypes.QueryStatusComplete {
+		for _, value := range result.Results {
+			fmt.Printf("\nTimestamp: %v\n", *value[0].Value)
+			fmt.Printf("Message: %v\n", *value[1].Value)
+		}
+		success = true
+	} else if !success {
+		// Recursion to try again if the status code comes back as anything else than 'complete'
+		check_query(client, query_id)
+	}
+}
+
 func main() {
-	// This script is hard coded to check for logs within a test environment.
-	// To use this script what needs to be changed are these two variables.
-	// In AWS CloudWatch Logs, there are 'Log groups' as well as 'Log streams' within these groups.
-	// Change these strings to your desired log group name and log stream name.
-	var log_group_name = "testing_group"
-	var log_stream_name = "testing_stream"
+	// This script will fetch resources only in CloudWatch Logs with the 'filtered_service' variable.
+	// It also uses tags in the form of key/value pairs to look for logs matching
+	// those specific tags.
+	// Bellow is the key and value(s) of these tags.
+	tagKey := aws.String("another_new_tag")
+	tagValues := []string{
+		"another value",
+	}
+	tag_filter := types.TagFilter{}
+	tag_filter.Key = tagKey
+	tag_filter.Values = tagValues
+	filtered_service := []string{"logs"}
+	var log_group_identifiers []string
+	var log_query_string = "fields @timestamp, @message, @logGroup | sort @timestamp desc | limit 20"
+	var from_epoch_date = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	var query_start_date = time.Date(2023, 7, 1, 6, 30, 0, 0, time.UTC)
+	var query_end_date = time.Now().UTC()
+	var query_start_time = query_start_date.Sub(from_epoch_date)
+	var query_end_time = query_end_date.Sub(from_epoch_date)
 
 	// Initializes a connection to AWS
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("eu-north-1"))
@@ -25,23 +67,48 @@ func main() {
 		log.Fatalf("unable to load SDK config, %v", err)
 	}
 
-	// Create a variable that will be used to make requests to AWS CloudWatch
+	// Create a configuration that will be used to make requests to AWS CloudWatch Logs API
 	client := cloudwatchlogs.NewFromConfig(cfg)
 
-	// Requests to AWS CloudWatch to get all log events from the specified log group and stream
-	resp, err := client.GetLogEvents(context.TODO(), &cloudwatchlogs.GetLogEventsInput{
-		LogGroupName:  aws.String(log_group_name),
-		LogStreamName: aws.String(log_stream_name),
+	// Create a configuration that will be used to make requests to AWS Resource Groups Tagging API
+	resource_client := resourcegroupstaggingapi.NewFromConfig(cfg)
+
+	// Create a request to AWS Resource Groups Tagging API to get all resources
+	tags, err := resource_client.GetResources(context.TODO(), &resourcegroupstaggingapi.GetResourcesInput{
+		TagFilters: []types.TagFilter{
+			tag_filter,
+		},
+		ResourceTypeFilters: filtered_service,
 	})
 	if err != nil {
-		log.Fatalf("Failed to fetch log events: %v", err)
+		log.Fatalf("Failed to get tags: %v", err)
 	}
 
-	// Prints all the output from the response given by CloudWatch
-	fmt.Println("Response")
-	for _, event := range resp.Events {
-		var timestamp = time.Unix(0, *event.Timestamp*int64(time.Millisecond))
-		fmt.Println("\nTimestamp:", timestamp.Format(time.RFC3339))
-		fmt.Println("Message:", *event.Message)
+	// Iterates through the list given from the 'GetResources' call and appends each resource ARN to a list
+	for _, thing := range tags.ResourceTagMappingList {
+		log_group_identifiers = append(log_group_identifiers, *thing.ResourceARN)
 	}
+
+	// A form of debugging to the user which log group(s) will be queried
+	fmt.Printf("A list of the Log Group identifiers filtered: \n%v\n", log_group_identifiers)
+
+	// Initializes a query for CloudWatch Logs Insights by the use of the Log Group Identifiers from the ResourceTagMappingList
+	query, err := client.StartQuery(context.TODO(), &cloudwatchlogs.StartQueryInput{
+		EndTime:             aws.Int64(int64(query_end_time.Seconds())),
+		StartTime:           aws.Int64(int64(query_start_time.Seconds())),
+		QueryString:         aws.String(log_query_string),
+		LogGroupIdentifiers: log_group_identifiers,
+	})
+	if err != nil {
+		log.Fatalf("Failed to start new Query: %v", err)
+	}
+
+	// Variable to store the Query ID
+	var query_id = *query.QueryId
+
+	// A message for the user to make sure the script works
+	fmt.Println("Waiting for CloudWatch Logs Query results...")
+
+	// Call to a function that returns the query result
+	check_query(client, query_id)
 }
