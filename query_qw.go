@@ -15,10 +15,18 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
 )
 
-func check_query(client *cloudwatchlogs.Client, query_id string) {
-	// Bool variable that will keep track of the success or failure of the query
-	var success bool = false
+func stop_ongoing_query(client *cloudwatchlogs.Client, query_id string) cloudwatchlogs.StopQueryOutput {
+	// Debug function to test what happens if query unexpectedly where to cancel
+	stop_query, err := client.StopQuery(context.TODO(), &cloudwatchlogs.StopQueryInput{
+		QueryId: aws.String(query_id),
+	})
+	if err != nil {
+		log.Fatalf("Failed to stop query: %v", err)
+	}
+	return *stop_query
+}
 
+func check_query(client *cloudwatchlogs.Client, query_id string) {
 	// Creates a request to CloudWatch Logs to get the query result
 	result, err := client.GetQueryResults(context.TODO(), &cloudwatchlogs.GetQueryResultsInput{
 		QueryId: aws.String(query_id),
@@ -27,16 +35,24 @@ func check_query(client *cloudwatchlogs.Client, query_id string) {
 		log.Fatalf("Failed to get the Query result: %v", err)
 	}
 
-	// This check looks for the status code: 'complete' from StartQuery
+	// Uncomment the line below to see the behavior by the script if the
+	// Log Insights Query where to be cancelled
+	// stop_ongoing_query(client, query_id)
+
+	// This check looks for the status code: 'Completed' from StartQuery
+	// Also creates a recursion to try again if the status code
+	// comes back as 'Running'. As the code is now, the status 'Schedueled' will not be returned.
 	if result.Status == ctypes.QueryStatusComplete {
 		for _, value := range result.Results {
 			fmt.Printf("\nTimestamp: %v\n", *value[0].Value)
 			fmt.Printf("Message: %v\n", *value[1].Value)
 		}
-		success = true
-	} else if !success {
-		// Recursion to try again if the status code comes back as anything else than 'complete'
+	} else if result.Status == ctypes.QueryStatusRunning {
+
 		check_query(client, query_id)
+	} else {
+		fmt.Printf("The status of this query is: %v\n", result.Status)
+		log.Fatalf("Query ID: %v", query_id)
 	}
 }
 
@@ -93,6 +109,9 @@ func main() {
 	fmt.Printf("A list of the Log Group identifiers filtered: \n%v\n", log_group_identifiers)
 
 	// Initializes a query for CloudWatch Logs Insights by the use of the Log Group Identifiers from the ResourceTagMappingList
+	if len(log_group_identifiers) < 1 {
+		log.Fatalf("No log groups found with tag pattern: {%s: %v}", *tagKey, tagValues)
+	}
 	query, err := client.StartQuery(context.TODO(), &cloudwatchlogs.StartQueryInput{
 		EndTime:             aws.Int64(int64(query_end_time.Seconds())),
 		StartTime:           aws.Int64(int64(query_start_time.Seconds())),
@@ -107,7 +126,7 @@ func main() {
 	var query_id = *query.QueryId
 
 	// A message for the user to make sure the script works
-	fmt.Println("Waiting for CloudWatch Logs Query results...")
+	fmt.Println("\nWaiting for CloudWatch Logs Query results...")
 
 	// Call to a function that returns the query result
 	check_query(client, query_id)
