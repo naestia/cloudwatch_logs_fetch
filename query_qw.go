@@ -44,8 +44,15 @@ func check_query(client *cloudwatchlogs.Client, query_id string) {
 	// comes back as 'Running'. As the code is now, the status 'Schedueled' will not be returned.
 	if result.Status == ctypes.QueryStatusComplete {
 		for _, value := range result.Results {
+			response, err := client.GetLogRecord(context.TODO(), &cloudwatchlogs.GetLogRecordInput{
+				LogRecordPointer: aws.String(*value[2].Value),
+			})
+			if err != nil {
+				log.Fatalf("Failed to fetch log record: %v", err)
+			}
+
 			fmt.Printf("\nTimestamp: %v\n", *value[0].Value)
-			fmt.Printf("Message: %v\n", *value[1].Value)
+			fmt.Printf("Message: %v", response.LogRecord["@message"])
 		}
 	} else if result.Status == ctypes.QueryStatusRunning {
 
